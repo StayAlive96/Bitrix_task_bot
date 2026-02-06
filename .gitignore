@@ -41,3 +41,6 @@ data/*.db
 *.db
 *.db.*
 data/*.db*
+
+# temp docs
+_tmp_*.html
