@@ -15,9 +15,10 @@ class BitrixError(Exception):
 
 
 class BitrixClient:
-    def __init__(self, webhook_base: str, timeout: float = 20.0):
+    def __init__(self, webhook_base: str, timeout: float = 20.0, upload_timeout: float = 90.0):
         self.webhook_base = webhook_base
         self.timeout = timeout
+        self.upload_timeout = upload_timeout
 
     async def call(self, method: str, data: list[tuple[str, str]] | dict[str, str]) -> dict[str, Any]:
         url = f"{self.webhook_base}{method}"
@@ -45,13 +46,23 @@ class BitrixClient:
         url = f"{self.webhook_base}disk.folder.uploadfile"
         name = filename or Path(local_path).name
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        # Upload can be significantly slower than regular REST calls.
+        timeout = httpx.Timeout(
+            connect=min(20.0, self.upload_timeout),
+            read=self.upload_timeout,
+            write=self.upload_timeout,
+            pool=min(20.0, self.upload_timeout),
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
             with open(local_path, "rb") as file_obj:
-                content = file_obj.read()
                 response = await client.post(
                     url,
-                    data={"id": str(int(folder_id))},
-                    files={"file": (name, content)},
+                    data={
+                        "id": str(int(folder_id)),
+                        "data[NAME]": name,
+                        "generateUniqueName": "true",
+                    },
+                    files={"file": (name, file_obj)},
                 )
 
         try:

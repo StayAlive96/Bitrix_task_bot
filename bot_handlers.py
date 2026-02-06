@@ -1207,6 +1207,13 @@ def _is_retryable_upload_error(exc: Exception) -> bool:
     return False
 
 
+def _format_exception_brief(exc: Exception) -> str:
+    text = str(exc).strip()
+    if text:
+        return f"{exc.__class__.__name__}: {text}"
+    return exc.__class__.__name__
+
+
 async def _upload_files_to_bitrix_disk(
     bitrix: BitrixClient,
     folder_id: int,
@@ -1252,14 +1259,15 @@ async def _upload_files_to_bitrix_disk(
                         file_label,
                         attempt,
                         max_attempts,
-                        exc,
+                        _format_exception_brief(exc),
                     )
                     continue
                 log.exception(
-                    "Disk upload failed name=%s attempt=%s/%s",
+                    "Disk upload failed name=%s attempt=%s/%s error=%s",
                     file_label,
                     attempt,
                     max_attempts,
+                    _format_exception_brief(exc),
                 )
                 failed_files.append(file_label)
                 break
