@@ -42,8 +42,36 @@ class BitrixClient:
             raise BitrixError(payload.get("error", "bitrix_error"), payload.get("error_description", ""))
         return payload
 
+    @staticmethod
+    def _extract_disk_file_id(payload: dict[str, Any]) -> int | None:
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            return None
+
+        # Most common shape: {"result": {"ID": "..."}}
+        for key in ("ID", "id", "FILE_ID", "fileId"):
+            value = result.get(key)
+            if value is not None:
+                try:
+                    return int(value)
+                except Exception:
+                    pass
+
+        # Some responses wrap the file object inside nested nodes.
+        for node_key in ("FILE", "file", "ITEM", "item", "OBJECT", "object"):
+            node = result.get(node_key)
+            if isinstance(node, dict):
+                for key in ("ID", "id", "FILE_ID", "fileId"):
+                    value = node.get(key)
+                    if value is not None:
+                        try:
+                            return int(value)
+                        except Exception:
+                            pass
+
+        return None
+
     async def upload_to_folder(self, folder_id: int, local_path: str, filename: str | None = None) -> int:
-        url = f"{self.webhook_base}disk.folder.uploadfile"
         name = filename or Path(local_path).name
 
         # Upload can be significantly slower than regular REST calls.
@@ -53,33 +81,56 @@ class BitrixClient:
             write=self.upload_timeout,
             pool=min(20.0, self.upload_timeout),
         )
+
+        # Step 1: request an upload slot from Bitrix Disk.
+        payload = await self.call(
+            "disk.folder.uploadfile",
+            [
+                ("id", str(int(folder_id))),
+                ("data[NAME]", name),
+                ("generateUniqueName", "true"),
+            ],
+        )
+        file_id = self._extract_disk_file_id(payload)
+        if file_id is not None:
+            return file_id
+
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise BitrixError("Cannot parse upload descriptor from Bitrix response", str(payload))
+
+        upload_url = result.get("uploadUrl")
+        field_name = result.get("field")
+        if not upload_url or not field_name:
+            raise BitrixError("Upload URL or field is missing in Bitrix response", str(payload))
+
+        # Step 2: upload binary to the signed URL returned by Step 1.
         async with httpx.AsyncClient(timeout=timeout) as client:
             with open(local_path, "rb") as file_obj:
                 response = await client.post(
-                    url,
-                    data={
-                        "id": str(int(folder_id)),
-                        "data[NAME]": name,
-                        "generateUniqueName": "true",
-                    },
-                    files={"file": (name, file_obj)},
+                    str(upload_url),
+                    files={str(field_name): (name, file_obj)},
                 )
 
         try:
-            payload = response.json()
+            upload_payload = response.json()
         except Exception:
             raise BitrixError(
-                f"Bitrix returned non-JSON response (HTTP {response.status_code})",
+                f"Bitrix upload URL returned non-JSON response (HTTP {response.status_code})",
                 response.text,
             )
 
-        if "error" in payload:
-            raise BitrixError(payload.get("error", "bitrix_error"), payload.get("error_description", ""))
+        if "error" in upload_payload:
+            raise BitrixError(
+                upload_payload.get("error", "bitrix_error"),
+                upload_payload.get("error_description", ""),
+            )
 
-        try:
-            return int(payload["result"]["ID"])
-        except Exception:
-            raise BitrixError("Cannot parse disk file id from Bitrix response", str(payload))
+        file_id = self._extract_disk_file_id(upload_payload)
+        if file_id is not None:
+            return file_id
+
+        raise BitrixError("Cannot parse disk file id from upload response", str(upload_payload))
 
     async def create_task(
         self,
