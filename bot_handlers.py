@@ -5,6 +5,7 @@ import datetime
 logger = logging.getLogger(__name__)
 import os
 import re
+import httpx
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -1178,6 +1179,97 @@ async def cmd_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # ВАЖНО: confirm_create у вас всегда упирался в блок "created_by is None" до вычисления usermap.
 # Исправляем минимально: берём created_by из sqlite через единый helper.
+def _saved_file_label(saved_file: SavedFile) -> str:
+    name = (saved_file.original_name or "").strip()
+    if name:
+        return name
+    return os.path.basename(saved_file.local_path) or "file"
+
+
+def _is_retryable_upload_error(exc: Exception) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, BitrixError):
+        details = f"{exc.message} {exc.details}".lower()
+        markers = (
+            "timeout",
+            "temporar",
+            "service unavailable",
+            "gateway timeout",
+            "too many request",
+            "internal",
+            "network",
+            "502",
+            "503",
+            "504",
+        )
+        return any(marker in details for marker in markers)
+    return False
+
+
+async def _upload_files_to_bitrix_disk(
+    bitrix: BitrixClient,
+    folder_id: int,
+    files: List[SavedFile],
+    max_attempts: int = 2,
+) -> tuple[list[int], list[str]]:
+    uploaded_ids: list[int] = []
+    failed_files: list[str] = []
+
+    for saved_file in files:
+        file_label = _saved_file_label(saved_file)
+        uploaded = False
+
+        for attempt in range(1, max_attempts + 1):
+            log.info(
+                "Disk upload start name=%s attempt=%s/%s folder_id=%s",
+                file_label,
+                attempt,
+                max_attempts,
+                folder_id,
+            )
+            try:
+                file_id = await bitrix.upload_to_folder(
+                    folder_id=folder_id,
+                    local_path=saved_file.local_path,
+                    filename=file_label,
+                )
+                uploaded_ids.append(int(file_id))
+                log.info(
+                    "Disk upload success name=%s file_id=%s attempt=%s/%s",
+                    file_label,
+                    file_id,
+                    attempt,
+                    max_attempts,
+                )
+                uploaded = True
+                break
+            except Exception as exc:
+                retryable = attempt < max_attempts and _is_retryable_upload_error(exc)
+                if retryable:
+                    log.warning(
+                        "Disk upload retry name=%s attempt=%s/%s error=%s",
+                        file_label,
+                        attempt,
+                        max_attempts,
+                        exc,
+                    )
+                    continue
+                log.exception(
+                    "Disk upload failed name=%s attempt=%s/%s",
+                    file_label,
+                    attempt,
+                    max_attempts,
+                )
+                failed_files.append(file_label)
+                break
+
+        if not uploaded and file_label not in failed_files:
+            failed_files.append(file_label)
+
+    return uploaded_ids, failed_files
+
+
 async def cb_confirm_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -1198,8 +1290,6 @@ async def cb_confirm_create(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     attachments = build_attachments_block(files, settings.upload_dir)
     full_desc = build_task_description(user_desc, initiator, attachments)
 
-    await query.message.reply_text("Создаю задачу в Bitrix24…")
-
     created_by = get_linked_bitrix_id(context, update.effective_user.id)
     log.info("HIT cb_confirm_create tg_id=%s created_by=%s", update.effective_user.id, created_by)
 
@@ -1211,6 +1301,34 @@ async def cb_confirm_create(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data.clear()
         return ConversationHandler.END
 
+    uploaded_ids: list[int] = []
+    failed_files: list[str] = []
+    if files:
+        await query.message.reply_text(f"Загружаю вложения в Bitrix24 Disk: {len(files)} шт.")
+        uploaded_ids, failed_files = await _upload_files_to_bitrix_disk(
+            bitrix=bitrix,
+            folder_id=settings.bitrix_disk_folder_id,
+            files=files,
+            max_attempts=2,
+        )
+        if failed_files and not uploaded_ids:
+            failed_list = "\n".join(f"- {name}" for name in failed_files)
+            await query.message.reply_text(
+                "Не удалось загрузить ни одно вложение, задача не создана.\n"
+                "Проверьте доступ к папке Bitrix Disk и попробуйте снова.\n\n"
+                f"Неуспешные файлы:\n{failed_list}"
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+        if failed_files:
+            failed_list = "\n".join(f"- {name}" for name in failed_files)
+            await query.message.reply_text(
+                "Часть вложений не загрузилась. Создам задачу только с успешно загруженными файлами.\n\n"
+                f"Неуспешные файлы:\n{failed_list}"
+            )
+
+    await query.message.reply_text("Создаю задачу в Bitrix24…")
+
     try:
         task_id = await bitrix.create_task(
             title=title,
@@ -1219,6 +1337,7 @@ async def cb_confirm_create(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             group_id=settings.bitrix_group_id,
             priority=settings.bitrix_priority,
             created_by=created_by,
+            webdav_file_ids=uploaded_ids,
         )
     except BitrixError as e:
         log.warning("Bitrix rejected CREATED_BY=%s, retrying without it: %s %s", created_by, e.message, e.details)
@@ -1230,6 +1349,7 @@ async def cb_confirm_create(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 group_id=settings.bitrix_group_id,
                 priority=settings.bitrix_priority,
                 created_by=None,
+                webdav_file_ids=uploaded_ids,
             )
         except Exception as e2:
             log.exception("Bitrix error (retry without CREATED_BY)")
@@ -1243,10 +1363,15 @@ async def cb_confirm_create(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
 
     link = _task_link(settings, task_id)
+    result_lines = ["Задача создана ✅", f"ID: {task_id}"]
     if link:
-        await query.message.reply_text("\n".join(["Задача создана ✅", f"ID: {task_id}", f"Ссылка: {link}"]))
-    else:
-        await query.message.reply_text("\n".join(["Задача создана ✅", f"ID: {task_id}"]))
+        result_lines.append(f"Ссылка: {link}")
+    if uploaded_ids:
+        result_lines.append(f"Вложений прикреплено: {len(uploaded_ids)}")
+    if failed_files:
+        failed_list = "\n".join(f"- {name}" for name in failed_files)
+        result_lines.append("Не загрузились файлы:\n" + failed_list)
+    await query.message.reply_text("\n".join(result_lines))
 
     context.user_data.clear()
     return ConversationHandler.END

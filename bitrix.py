@@ -94,7 +94,7 @@ class BitrixClient:
             fields.append(("fields[CREATED_BY]", str(created_by)))
         if webdav_file_ids:
             for idx, file_id in enumerate(webdav_file_ids):
-                fields.append((f"fields[UF_TASK_WEBDAV_FILES][{idx}]", str(int(file_id))))
+                fields.append((f"fields[UF_TASK_WEBDAV_FILES][{idx}]", f"n{int(file_id)}"))
 
         payload = await self.call("tasks.task.add", fields)
         try:

@@ -9,6 +9,7 @@ Telegram-бот для создания задач в Bitrix24 через webhoo
 - Проверять текущую привязку (`/me`).
 - Ограничивать доступ по списку Telegram ID (`ALLOWED_TG_USERS`).
 - Сохранять вложения от пользователя локально (фото/документы).
+- Загружать вложения в Bitrix Disk и прикреплять их к задаче через `UF_TASK_WEBDAV_FILES`.
 - Формировать ссылку на задачу в ответе после создания.
 
 ## Технологии
@@ -69,6 +70,7 @@ python main.py
 - `TG_BOT_TOKEN` - токен Telegram-бота.
 - `BITRIX_WEBHOOK_BASE` - базовый URL webhook Bitrix24 (обязательно с финальным `/`).
 - `BITRIX_DEFAULT_RESPONSIBLE_ID` - `RESPONSIBLE_ID` по умолчанию для создаваемых задач.
+- `BITRIX_DISK_FOLDER_ID` - ID папки Bitrix Disk для загрузки вложений перед созданием задачи.
 
 ### Опциональные
 
@@ -90,6 +92,7 @@ python main.py
 TG_BOT_TOKEN=1234567890:AA...
 BITRIX_WEBHOOK_BASE=https://yourportal.bitrix24.ru/rest/1/abcdef1234567890/
 BITRIX_DEFAULT_RESPONSIBLE_ID=1
+BITRIX_DISK_FOLDER_ID=1483465
 
 BITRIX_GROUP_ID=10
 BITRIX_PRIORITY=1
@@ -137,8 +140,10 @@ UPLOAD_DIR/YYYY-MM-DD/<tg_id>/<ticket_id>/...
 
 - Бот не создает задачи без привязки профиля Bitrix.
 - `CREATED_BY` берется из привязки пользователя; если Bitrix отклоняет этот параметр, есть fallback-попытка создания без него.
-- Вложения сейчас сохраняются локально и перечисляются в описании задачи.
-  - Клиент `BitrixClient.upload_to_folder(...)` в проекте есть, но в текущем потоке создания задачи не используется.
+- Вложения сначала сохраняются локально, затем загружаются в Bitrix Disk (`disk.folder.uploadfile`) в папку `BITRIX_DISK_FOLDER_ID`.
+- При создании задачи вложения передаются в `UF_TASK_WEBDAV_FILES` в формате `n<file_id>`.
+- Если пользователь приложил файлы и не загрузился ни один, задача не создается.
+- Если загрузилась только часть файлов, задача создается с успешными вложениями, а бот показывает список неуспешных.
 
 ## Troubleshooting
 
@@ -148,6 +153,9 @@ UPLOAD_DIR/YYYY-MM-DD/<tg_id>/<ticket_id>/...
 - Ошибка `BITRIX_WEBHOOK_BASE must end with '/'`:
   - Добавьте завершающий `/` в URL webhook.
 
+- Ошибка `BITRIX_DISK_FOLDER_ID is required`:
+  - Добавьте `BITRIX_DISK_FOLDER_ID` в `.env` (целочисленный ID папки Bitrix Disk).
+
 - Бот пишет «Доступ запрещён»:
   - Проверьте `ALLOWED_TG_USERS` и ваш Telegram ID (`/me`).
 
@@ -156,6 +164,9 @@ UPLOAD_DIR/YYYY-MM-DD/<tg_id>/<ticket_id>/...
 
 - Задача создалась, но нет ссылки:
   - Заполните `BITRIX_TASK_URL_TEMPLATE` или `BITRIX_PORTAL_BASE`.
+
+- Бот сообщает, что вложения не загрузились и задача не создана:
+  - Проверьте, что `BITRIX_DISK_FOLDER_ID` существует, webhook имеет права на Disk, и папка доступна пользователю webhook.
 
 ## Разработка
 

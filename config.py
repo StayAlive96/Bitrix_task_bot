@@ -40,6 +40,7 @@ class Settings:
     tg_bot_token: str
     bitrix_webhook_base: str
     bitrix_default_responsible_id: int
+    bitrix_disk_folder_id: int
     bitrix_group_id: int | None
     bitrix_priority: int | None
     bitrix_portal_base: str
@@ -65,6 +66,10 @@ def load_settings() -> Settings:
     if resp_id is None:
         raise RuntimeError("BITRIX_DEFAULT_RESPONSIBLE_ID is required")
 
+    disk_folder_id = _getenv_int("BITRIX_DISK_FOLDER_ID")
+    if disk_folder_id is None:
+        raise RuntimeError("BITRIX_DISK_FOLDER_ID is required")
+
     group_id = _getenv_int("BITRIX_GROUP_ID", None)
     priority = _getenv_int("BITRIX_PRIORITY", None)
 
@@ -81,6 +86,7 @@ def load_settings() -> Settings:
         tg_bot_token=tg_bot_token,
         bitrix_webhook_base=bitrix_webhook_base,
         bitrix_default_responsible_id=resp_id,
+        bitrix_disk_folder_id=disk_folder_id,
         bitrix_group_id=group_id,
         bitrix_priority=priority,
         bitrix_portal_base=portal_base,
