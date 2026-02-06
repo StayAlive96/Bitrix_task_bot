@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -20,8 +21,13 @@ class BitrixClient:
 
     async def call(self, method: str, data: list[tuple[str, str]] | dict[str, str]) -> dict[str, Any]:
         url = f"{self.webhook_base}{method}"
+        encoded = urlencode(data).encode("utf-8")
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, data=data)
+            response = await client.post(
+                url,
+                content=encoded,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
 
         try:
             payload = response.json()
@@ -41,10 +47,11 @@ class BitrixClient:
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             with open(local_path, "rb") as file_obj:
+                content = file_obj.read()
                 response = await client.post(
                     url,
                     data={"id": str(int(folder_id))},
-                    files={"file": (name, file_obj)},
+                    files={"file": (name, content)},
                 )
 
         try:
