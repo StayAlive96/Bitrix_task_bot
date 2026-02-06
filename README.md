@@ -1,0 +1,178 @@
+﻿# Bitrix Task Bot (Telegram -> Bitrix24)
+
+Telegram-бот для создания задач в Bitrix24 через webhook. Бот ведет пользователя по диалогу (название -> описание -> вложения -> подтверждение), создает задачу в Bitrix и хранит привязку `Telegram ID -> Bitrix User ID` в SQLite.
+
+## Что умеет
+
+- Создавать задачи в Bitrix24 из Telegram (`/task` или кнопка «Создать задачу»).
+- Привязывать профиль сотрудника Bitrix24 (`/link` или кнопка «Привязать профиль»).
+- Проверять текущую привязку (`/me`).
+- Ограничивать доступ по списку Telegram ID (`ALLOWED_TG_USERS`).
+- Сохранять вложения от пользователя локально (фото/документы).
+- Формировать ссылку на задачу в ответе после создания.
+
+## Технологии
+
+- Python 3.11+
+- [python-telegram-bot 21.6](https://github.com/python-telegram-bot/python-telegram-bot)
+- [httpx](https://www.python-httpx.org/)
+- [python-dotenv](https://github.com/theskumar/python-dotenv)
+- SQLite (встроенный модуль `sqlite3`)
+
+## Структура проекта
+
+- `main.py` - точка входа, регистрация хендлеров Telegram.
+- `bot_handlers.py` - диалоги и команды бота.
+- `bitrix.py` - клиент Bitrix REST webhook.
+- `config.py` - загрузка и валидация переменных окружения.
+- `usermap.py` - SQLite-слой привязки Telegram <-> Bitrix.
+- `linking.py` - helper-слой доступа к привязке.
+- `storage.py` - пути и хранение вложений.
+- `utils.py` - утилиты (ID тикета, имя файла, директории).
+- `requirements.txt` - зависимости.
+
+## Подготовка Bitrix24
+
+1. Создайте входящий webhook в Bitrix24 с правами на задачи (и диск, если планируете подключать загрузку файлов в диск Bitrix).
+2. Скопируйте webhook URL в формате вида:
+
+```text
+https://<portal>.bitrix24.ru/rest/<user_id>/<webhook_token>/
+```
+
+Важно: URL должен оканчиваться на `/`, иначе приложение завершится с ошибкой валидации.
+
+## Установка и запуск
+
+1. Создайте виртуальное окружение и установите зависимости:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+2. Создайте файл `.env` в корне проекта.
+
+3. Запустите бота:
+
+```powershell
+python main.py
+```
+
+## Конфигурация (.env)
+
+Ниже полный список поддерживаемых переменных.
+
+### Обязательные
+
+- `TG_BOT_TOKEN` - токен Telegram-бота.
+- `BITRIX_WEBHOOK_BASE` - базовый URL webhook Bitrix24 (обязательно с финальным `/`).
+- `BITRIX_DEFAULT_RESPONSIBLE_ID` - `RESPONSIBLE_ID` по умолчанию для создаваемых задач.
+
+### Опциональные
+
+- `BITRIX_GROUP_ID` - группа/проект для задачи (`GROUP_ID`).
+- `BITRIX_PRIORITY` - приоритет задачи (`PRIORITY`).
+- `BITRIX_PORTAL_BASE` - базовый URL портала, используется для fallback-ссылки на задачу.
+- `BITRIX_TASK_URL_TEMPLATE` - шаблон ссылки на задачу, например:
+  - `https://yourportal.bitrix24.ru/company/personal/user/1/tasks/task/view/{task_id}/`
+- `ALLOWED_TG_USERS` - CSV список Telegram ID, которым разрешен доступ.
+  - Пример: `12345678,987654321`
+  - Если пусто, доступ разрешен всем.
+- `UPLOAD_DIR` - директория локального сохранения вложений (по умолчанию `./uploads`).
+- `USERMAP_DB` - путь к SQLite БД привязок (по умолчанию `./data/users.db`).
+- `LOG_LEVEL` - уровень логирования (`INFO` по умолчанию).
+
+### Пример `.env`
+
+```env
+TG_BOT_TOKEN=1234567890:AA...
+BITRIX_WEBHOOK_BASE=https://yourportal.bitrix24.ru/rest/1/abcdef1234567890/
+BITRIX_DEFAULT_RESPONSIBLE_ID=1
+
+BITRIX_GROUP_ID=10
+BITRIX_PRIORITY=1
+
+BITRIX_PORTAL_BASE=https://yourportal.bitrix24.ru
+BITRIX_TASK_URL_TEMPLATE=https://yourportal.bitrix24.ru/company/personal/user/1/tasks/task/view/{task_id}/
+
+ALLOWED_TG_USERS=12345678,87654321
+UPLOAD_DIR=./uploads
+USERMAP_DB=./data/users.db
+LOG_LEVEL=INFO
+```
+
+## Пользовательский сценарий
+
+1. Пользователь отправляет `/start`.
+2. Нажимает «Привязать профиль» и отправляет:
+- либо ссылку на профиль вида `.../company/personal/user/123/`
+- либо просто число `123`
+3. Нажимает «Создать задачу» (или `/task`).
+4. Вводит название, затем описание.
+5. Прикладывает файлы/скриншоты (опционально), затем нажимает «Готово».
+6. Подтверждает создание.
+7. Бот создает задачу в Bitrix и возвращает `ID` (и ссылку, если настроена).
+
+## Команды
+
+- `/start` - показать меню.
+- `/task` - запустить диалог создания задачи.
+- `/link` - запустить диалог привязки Bitrix-профиля.
+- `/me` - показать текущие `TG ID` и привязанный `Bitrix ID`.
+- `/cancel` - отменить текущий диалог.
+
+## Хранение данных
+
+- Привязка пользователей хранится в SQLite: `USERMAP_DB`.
+- Таблица: `tg_bitrix_map (tg_id, bitrix_user_id, linked_at)`.
+- Вложения сохраняются локально в структуре:
+
+```text
+UPLOAD_DIR/YYYY-MM-DD/<tg_id>/<ticket_id>/...
+```
+
+## Важные детали реализации
+
+- Бот не создает задачи без привязки профиля Bitrix.
+- `CREATED_BY` берется из привязки пользователя; если Bitrix отклоняет этот параметр, есть fallback-попытка создания без него.
+- Вложения сейчас сохраняются локально и перечисляются в описании задачи.
+  - Клиент `BitrixClient.upload_to_folder(...)` в проекте есть, но в текущем потоке создания задачи не используется.
+
+## Troubleshooting
+
+- Ошибка `TG_BOT_TOKEN is required`:
+  - Проверьте, что `.env` лежит в корне проекта и содержит `TG_BOT_TOKEN`.
+
+- Ошибка `BITRIX_WEBHOOK_BASE must end with '/'`:
+  - Добавьте завершающий `/` в URL webhook.
+
+- Бот пишет «Доступ запрещён»:
+  - Проверьте `ALLOWED_TG_USERS` и ваш Telegram ID (`/me`).
+
+- Бот не дает создать задачу и просит привязать профиль:
+  - Выполните `/link` и отправьте корректный URL профиля или ID пользователя Bitrix.
+
+- Задача создалась, но нет ссылки:
+  - Заполните `BITRIX_TASK_URL_TEMPLATE` или `BITRIX_PORTAL_BASE`.
+
+## Разработка
+
+Локальный запуск для разработки:
+
+```powershell
+python main.py
+```
+
+Полезно включить подробные логи:
+
+```env
+LOG_LEVEL=DEBUG
+```
+
+## Безопасность
+
+- Не коммитьте `.env` и webhook токены.
+- Ограничьте `ALLOWED_TG_USERS` для production-окружения.
+- Регулярно ротируйте webhook-ключи в Bitrix24.
