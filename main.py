@@ -32,6 +32,11 @@ def setup_logging(level: str) -> None:
 def main() -> None:
     settings = load_settings()
     setup_logging(settings.log_level)
+    logging.getLogger(__name__).info(
+        "Config loaded: BITRIX_DISK_FOLDER_ID=%s, LOG_LEVEL=%s",
+        settings.bitrix_disk_folder_id,
+        settings.log_level,
+    )
 
     ensure_dir(settings.upload_dir)
 
