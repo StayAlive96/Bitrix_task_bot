@@ -1439,7 +1439,7 @@ from linking import set_linked_bitrix_id as _set_linked_bitrix_id
 
 _CLEAN_LOG = logging.getLogger("clean")
 BTN_MY_TASKS = "📋 Мои задачи"
-MYTASKS_LIMIT = 7
+MYTASKS_LIMIT = 5
 _REAL_STATUS_LABELS = {
     1: "Новая",
     2: "Ждёт выполнения",

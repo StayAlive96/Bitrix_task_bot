@@ -307,17 +307,19 @@ class BitrixClient:
             "tasks.task.list",
             [
                 ("filter[CREATED_BY]", str(int(created_by))),
-                ("order[ID]", "desc"),
+                ("order[CREATED_DATE]", "desc"),
                 ("select[]", "ID"),
                 ("select[]", "TITLE"),
                 ("select[]", "STATUS"),
                 ("select[]", "REAL_STATUS"),
                 ("select[]", "DEADLINE"),
+                ("select[]", "CREATED_DATE"),
                 ("select[]", "id"),
                 ("select[]", "title"),
                 ("select[]", "status"),
                 ("select[]", "realStatus"),
                 ("select[]", "deadline"),
+                ("select[]", "createdDate"),
             ],
         )
 
