@@ -219,20 +219,41 @@ class BitrixClient:
 
         raise BitrixError("Cannot parse disk file id from upload response", str(upload_payload))
 
-    async def upload_to_folder(self, folder_id: int, local_path: str, filename: str | None = None) -> int:
+    async def upload_to_folder(
+        self,
+        folder_id: int,
+        local_path: str,
+        filename: str | None = None,
+        upload_attempt: int | None = None,
+        upload_max_attempts: int | None = None,
+    ) -> int:
         name = filename or Path(local_path).name
         size_bytes = Path(local_path).stat().st_size
 
         # For small files prefer fileContent to avoid waiting on unstable signed upload URL.
         small_file = size_bytes <= 2 * 1024 * 1024
+        on_last_attempt = bool(
+            upload_attempt is not None
+            and upload_max_attempts is not None
+            and upload_attempt >= upload_max_attempts
+        )
         if small_file:
-            # Keep small-file uploads fast but avoid overly aggressive timeouts on unstable links.
-            small_fc_timeout = min(self.upload_timeout, 15.0)
-            small_url_timeout = min(self.upload_url_timeout, 12.0)
-            strategies = (
-                ("fileContent", self._upload_via_file_content, small_fc_timeout),
-                ("uploadUrl", self._upload_via_upload_url, small_url_timeout),
-            )
+            if on_last_attempt:
+                # Final attempt: force both strategies with fuller timeout budget.
+                final_url_timeout = min(self.upload_url_timeout, 20.0)
+                final_fc_timeout = min(self.upload_timeout, 15.0)
+                strategies = (
+                    ("uploadUrl", self._upload_via_upload_url, final_url_timeout),
+                    ("fileContent", self._upload_via_file_content, final_fc_timeout),
+                )
+            else:
+                # Early attempts: fast probe via fileContent; retry quickly on timeout stalls.
+                small_fc_timeout = min(self.upload_timeout, 8.0)
+                small_url_timeout = min(self.upload_url_timeout, 10.0)
+                strategies = (
+                    ("fileContent", self._upload_via_file_content, small_fc_timeout),
+                    ("uploadUrl", self._upload_via_upload_url, small_url_timeout),
+                )
         else:
             strategies = (
                 ("uploadUrl", self._upload_via_upload_url, self.upload_timeout),
@@ -251,33 +272,44 @@ class BitrixClient:
                 )
                 elapsed_ms = int((time.monotonic() - started) * 1000)
                 log.info(
-                    "Bitrix disk upload strategy=%s success file=%s size=%sB elapsed_ms=%s timeout_s=%s",
+                    "Bitrix disk upload strategy=%s success file=%s size=%sB elapsed_ms=%s timeout_s=%s attempt=%s/%s",
                     strategy_name,
                     name,
                     size_bytes,
                     elapsed_ms,
                     timeout_s,
+                    upload_attempt,
+                    upload_max_attempts,
                 )
                 return file_id
             except Exception as exc:
                 elapsed_ms = int((time.monotonic() - started) * 1000)
                 err = self._exc_brief(exc)
                 log.warning(
-                    "Bitrix disk upload strategy=%s failed file=%s size=%sB elapsed_ms=%s timeout_s=%s error=%s",
+                    "Bitrix disk upload strategy=%s failed file=%s size=%sB elapsed_ms=%s timeout_s=%s attempt=%s/%s error=%s",
                     strategy_name,
                     name,
                     size_bytes,
                     elapsed_ms,
                     timeout_s,
+                    upload_attempt,
+                    upload_max_attempts,
                     err,
                 )
                 failures.append(f"{strategy_name}: {err}")
                 # For small files, timeout on fileContent usually means transient Bitrix/network stall.
                 # Skip uploadUrl in the same attempt and let outer retry happen immediately.
-                if small_file and strategy_name == "fileContent" and self._is_timeout_error(exc):
+                if (
+                    small_file
+                    and not on_last_attempt
+                    and strategy_name == "fileContent"
+                    and self._is_timeout_error(exc)
+                ):
                     log.warning(
-                        "Bitrix disk upload short-circuit file=%s reason=fileContent_timeout",
+                        "Bitrix disk upload short-circuit file=%s attempt=%s/%s reason=fileContent_timeout",
                         name,
+                        upload_attempt,
+                        upload_max_attempts,
                     )
                     break
 

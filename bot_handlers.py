@@ -1259,6 +1259,8 @@ async def _upload_files_to_bitrix_disk(
                     folder_id=folder_id,
                     local_path=saved_file.local_path,
                     filename=file_label,
+                    upload_attempt=attempt,
+                    upload_max_attempts=max_attempts,
                 )
                 uploaded_ids.append(int(file_id))
                 log.info(
