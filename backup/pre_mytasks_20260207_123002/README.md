@@ -7,7 +7,6 @@ Telegram-бот для создания задач в Bitrix24 через webhoo
 - Создавать задачи в Bitrix24 из Telegram (`/task` или кнопка «Создать задачу»).
 - Привязывать профиль сотрудника Bitrix24 (`/link` или кнопка «Привязать профиль»).
 - Проверять текущую привязку (`/me`).
-- Показывать активные задачи, где пользователь назначен ответственным (`/mytasks` или кнопка «Мои задачи»).
 - Ограничивать доступ по списку Telegram ID (`ALLOWED_TG_USERS`).
 - Сохранять вложения от пользователя локально (фото/документы).
 - Загружать вложения в Bitrix Disk и прикреплять их к задаче через `UF_TASK_WEBDAV_FILES`.
@@ -92,7 +91,6 @@ python main.py
 - `BITRIX_SMALL_UPLOAD_FINAL_TIMEOUT` - таймаут для финальной попытки (и `fileContent`, и `uploadUrl`) на небольших файлах (по умолчанию `5`).
 - `BITRIX_UPLOAD_MAX_ATTEMPTS` - число попыток загрузки одного файла в Bitrix Disk (по умолчанию `4`).
 - `BITRIX_UPLOAD_PARALLELISM` - сколько файлов загружать параллельно (по умолчанию `2`).
-- `ENABLE_MYTASKS` - включить команду `/mytasks` (`true`/`false`, по умолчанию `true`).
 - `LOG_LEVEL` - уровень логирования (`INFO` по умолчанию).
 
 ### Пример `.env`
@@ -120,7 +118,6 @@ BITRIX_SMALL_UPLOAD_PROBE_TIMEOUT=4
 BITRIX_SMALL_UPLOAD_FINAL_TIMEOUT=5
 BITRIX_UPLOAD_MAX_ATTEMPTS=4
 BITRIX_UPLOAD_PARALLELISM=2
-ENABLE_MYTASKS=true
 
 LOG_LEVEL=INFO
 ```
@@ -143,7 +140,6 @@ LOG_LEVEL=INFO
 - `/task` - запустить диалог создания задачи.
 - `/link` - запустить диалог привязки Bitrix-профиля.
 - `/me` - показать текущие `TG ID` и привязанный `Bitrix ID`.
-- `/mytasks` - показать активные задачи, где ваш привязанный `Bitrix ID` указан как `RESPONSIBLE_ID`.
 - `/cancel` - отменить текущий диалог.
 
 ## Хранение данных
@@ -159,8 +155,6 @@ UPLOAD_DIR/YYYY-MM-DD/<tg_id>/<ticket_id>/...
 ## Важные детали реализации
 
 - Бот не создает задачи без привязки профиля Bitrix.
-- `/mytasks` работает в режиме read-only: бот только читает список задач и не меняет их.
-- `/mytasks` выводит только активные задачи, где привязанный пользователь является `RESPONSIBLE_ID`.
 - `CREATED_BY` берется из привязки пользователя; если Bitrix отклоняет этот параметр, есть fallback-попытка создания без него.
 - Вложения сначала сохраняются локально, затем загружаются в Bitrix Disk (`disk.folder.uploadfile`) в папку `BITRIX_DISK_FOLDER_ID`.
 - При нескольких вложениях загрузка выполняется с ограниченной параллельностью (настраивается через `BITRIX_UPLOAD_PARALLELISM`), чтобы сократить общее время.

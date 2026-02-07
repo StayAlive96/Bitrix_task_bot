@@ -32,18 +32,6 @@ def _getenv_float(name: str, default: float | None = None) -> float | None:
         raise ValueError(f"Env {name} must be float, got: {val}")
 
 
-def _getenv_bool(name: str, default: bool = False) -> bool:
-    val = _getenv(name)
-    if not val:
-        return default
-    normalized = val.strip().lower()
-    if normalized in {"1", "true", "yes", "y", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "n", "off"}:
-        return False
-    raise ValueError(f"Env {name} must be boolean-like, got: {val}")
-
-
 def _parse_csv_ints(s: str) -> set[int]:
     s = (s or "").strip()
     if not s:
@@ -77,7 +65,6 @@ class Settings:
     bitrix_small_upload_final_timeout: float
     bitrix_upload_max_attempts: int
     bitrix_upload_parallelism: int
-    enable_mytasks: bool
     log_level: str
 
 
@@ -117,7 +104,6 @@ def load_settings() -> Settings:
     bitrix_small_upload_final_timeout = _getenv_float("BITRIX_SMALL_UPLOAD_FINAL_TIMEOUT", 5.0) or 5.0
     bitrix_upload_max_attempts = _getenv_int("BITRIX_UPLOAD_MAX_ATTEMPTS", 4) or 4
     bitrix_upload_parallelism = _getenv_int("BITRIX_UPLOAD_PARALLELISM", 2) or 2
-    enable_mytasks = _getenv_bool("ENABLE_MYTASKS", True)
     if bitrix_upload_max_attempts < 1:
         bitrix_upload_max_attempts = 1
     if bitrix_upload_parallelism < 1:
@@ -143,6 +129,5 @@ def load_settings() -> Settings:
         bitrix_small_upload_final_timeout=bitrix_small_upload_final_timeout,
         bitrix_upload_max_attempts=bitrix_upload_max_attempts,
         bitrix_upload_parallelism=bitrix_upload_parallelism,
-        enable_mytasks=enable_mytasks,
         log_level=log_level,
     )

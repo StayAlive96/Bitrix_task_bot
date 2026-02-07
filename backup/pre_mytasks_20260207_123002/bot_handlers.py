@@ -1438,20 +1438,10 @@ from linking import get_linked_bitrix_id as _get_linked_bitrix_id
 from linking import set_linked_bitrix_id as _set_linked_bitrix_id
 
 _CLEAN_LOG = logging.getLogger("clean")
-BTN_MY_TASKS = "📋 Мои задачи"
-MYTASKS_LIMIT = 7
-_REAL_STATUS_LABELS = {
-    1: "Новая",
-    2: "Ждёт выполнения",
-    3: "В работе",
-    4: "Ждёт контроля",
-    5: "Завершена",
-    6: "Отложена",
-}
 
 # UX: /start -> 2 кнопки. HELP показываем только в экране "нужна привязка".
-MAIN_MENU_START = ReplyKeyboardMarkup([[BTN_CREATE, BTN_LINK], [BTN_MY_TASKS, BTN_HELP]], resize_keyboard=True)
-MAIN_MENU_LINK_REQUIRED = ReplyKeyboardMarkup([[BTN_CREATE, BTN_LINK], [BTN_MY_TASKS, BTN_HELP]], resize_keyboard=True)
+MAIN_MENU_START = ReplyKeyboardMarkup([[BTN_CREATE, BTN_LINK], [BTN_HELP]], resize_keyboard=True)
+MAIN_MENU_LINK_REQUIRED = ReplyKeyboardMarkup([[BTN_CREATE, BTN_LINK], [BTN_HELP]], resize_keyboard=True)
 
 async def show_link_required(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tg_id = update.effective_user.id if update.effective_user else None
@@ -1480,96 +1470,6 @@ async def cmd_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     bid = _get_linked_bitrix_id(context, tg_id)
     _CLEAN_LOG.info("HIT cmd_me tg_id=%s linked=%s", tg_id, bid)
     await update.message.reply_text(f"TG ID: {tg_id}\nBitrix ID (linked): {bid}", reply_markup=MAIN_MENU_START)
-
-
-def _status_label(task: dict) -> str:
-    raw = task.get("realStatus", task.get("REAL_STATUS", task.get("status", task.get("STATUS"))))
-    try:
-        return _REAL_STATUS_LABELS.get(int(raw), str(raw))
-    except Exception:
-        return str(raw or "-")
-
-
-def _deadline_label(task: dict) -> str:
-    deadline = task.get("deadline", task.get("DEADLINE"))
-    if not deadline:
-        return "-"
-    text = str(deadline).strip()
-    if not text:
-        return "-"
-    try:
-        normalized = text.replace("Z", "+00:00")
-        dt = datetime.datetime.fromisoformat(normalized)
-        return dt.strftime("%d.%m.%Y %H:%M")
-    except Exception:
-        return text
-
-
-def _task_id(task: dict) -> int | None:
-    raw = task.get("id", task.get("ID"))
-    try:
-        return int(raw)
-    except Exception:
-        return None
-
-
-async def cmd_mytasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    settings = context.application.bot_data["settings"]
-    tg_id = update.effective_user.id
-    if not _is_allowed(settings, tg_id):
-        await update.message.reply_text("Доступ запрещён.", reply_markup=MAIN_MENU_START)
-        return
-
-    if not getattr(settings, "enable_mytasks", True):
-        await update.message.reply_text(
-            "Функция «Мои задачи» сейчас отключена администратором.",
-            reply_markup=MAIN_MENU_START,
-        )
-        return
-
-    bitrix_user_id = _get_linked_bitrix_id(context, tg_id)
-    _CLEAN_LOG.info("HIT cmd_mytasks tg_id=%s linked=%s", tg_id, bitrix_user_id)
-    if not bitrix_user_id:
-        await show_link_required(update, context)
-        return
-
-    bitrix: BitrixClient = context.application.bot_data["bitrix"]
-    await update.message.reply_text("Смотрю ваши активные задачи в Bitrix24…")
-    try:
-        tasks = await bitrix.list_tasks_for_responsible(int(bitrix_user_id), limit=MYTASKS_LIMIT)
-    except Exception:
-        _CLEAN_LOG.exception("cmd_mytasks failed tg_id=%s bitrix_user_id=%s", tg_id, bitrix_user_id)
-        await update.message.reply_text(
-            "Не удалось получить список задач из Bitrix24. Попробуйте позже.",
-            reply_markup=MAIN_MENU_START,
-        )
-        return
-
-    if not tasks:
-        await update.message.reply_text(
-            "Активных задач, где вы ответственный, сейчас нет ✅",
-            reply_markup=MAIN_MENU_START,
-        )
-        return
-
-    lines = ["📋 Ваши активные задачи (вы ответственный):"]
-    for index, task in enumerate(tasks, start=1):
-        task_id = _task_id(task)
-        title = str(task.get("title", task.get("TITLE", "(без названия)"))).strip() or "(без названия)"
-        if len(title) > 110:
-            title = f"{title[:107]}..."
-        status = _status_label(task)
-        deadline = _deadline_label(task)
-        row = [f"{index}. #{task_id if task_id is not None else '?'} — {title}", f"Статус: {status}"]
-        if deadline != "-":
-            row.append(f"Срок: {deadline}")
-        if task_id is not None:
-            link = _task_link(settings, task_id)
-            if link:
-                row.append(f"Ссылка: {link}")
-        lines.append("\n".join(row))
-
-    await update.message.reply_text("\n\n".join(lines), reply_markup=MAIN_MENU_START)
 
 async def hydrate_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # hydration остаётся, но source of truth — sqlite.
@@ -1659,9 +1559,6 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     if text == BTN_LINK:
         await link_start(update, context)
-        return
-    if text == BTN_MY_TASKS:
-        await cmd_mytasks(update, context)
         return
     if text == BTN_CREATE:
         # ВАЖНО: не вызывать cmd_task напрямую из меню в обход ConversationHandler.

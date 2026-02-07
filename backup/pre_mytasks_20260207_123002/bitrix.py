@@ -297,41 +297,6 @@ class BitrixClient:
 
         raise BitrixError("All disk upload strategies failed", " | ".join(failures))
 
-    async def list_tasks_for_responsible(
-        self,
-        responsible_id: int,
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        safe_limit = max(1, min(int(limit), 20))
-        payload = await self.call(
-            "tasks.task.list",
-            [
-                ("filter[RESPONSIBLE_ID]", str(int(responsible_id))),
-                ("filter[!REAL_STATUS]", "5"),
-                ("order[ID]", "desc"),
-                ("select[]", "ID"),
-                ("select[]", "TITLE"),
-                ("select[]", "REAL_STATUS"),
-                ("select[]", "DEADLINE"),
-            ],
-        )
-
-        result = payload.get("result")
-        tasks: list[Any]
-        if isinstance(result, dict):
-            nested = result.get("tasks")
-            tasks = nested if isinstance(nested, list) else []
-        elif isinstance(result, list):
-            tasks = result
-        else:
-            tasks = []
-
-        normalized: list[dict[str, Any]] = []
-        for item in tasks:
-            if isinstance(item, dict):
-                normalized.append(item)
-        return normalized[:safe_limit]
-
     async def create_task(
         self,
         title: str,

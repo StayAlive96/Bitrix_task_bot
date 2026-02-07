@@ -7,13 +7,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from bitrix import BitrixClient
 from bot_handlers import (
-    BTN_MY_TASKS,
     BTN_HELP,
     build_conversation_handler,
     build_link_conversation_handler,
     cmd_cancel,
     cmd_me,
-    cmd_mytasks,
     cmd_start,
     hydrate_link,
     maybe_show_menu,
@@ -63,16 +61,11 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("me", cmd_me))
-    app.add_handler(CommandHandler("mytasks", cmd_mytasks))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
 
-    # Route only helper/menu buttons here. Link/create are handled by conversations.
+    # Route only the help button here. Link/create are handled by conversations.
     app.add_handler(
         MessageHandler(filters.Regex(rf"^{re.escape(BTN_HELP)}$"), menu_router),
-        group=0,
-    )
-    app.add_handler(
-        MessageHandler(filters.Regex(rf"^{re.escape(BTN_MY_TASKS)}$"), cmd_mytasks),
         group=0,
     )
 
@@ -82,7 +75,7 @@ def main() -> None:
     # Fallback: show menu once on the first plain text message.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, maybe_show_menu), group=99)
 
-    logging.getLogger(__name__).info("Bot started. Waiting for commands /start, /task, /mytasks")
+    logging.getLogger(__name__).info("Bot started. Waiting for commands /start or /task")
     app.run_polling(allowed_updates=None)
 
 
